@@ -1,40 +1,39 @@
 package com.chatchikuro.app;
 
-import android.app.Activity;
-import android.os.Bundle;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
-import android.webkit.WebChromeClient;
-import android.webkit.WebSettings;
-import android.view.WindowManager;
-import android.view.View;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
+import android.app.DownloadManager;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.os.Build;
-import android.widget.ProgressBar;
-import android.app.DownloadManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
+import android.view.View;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
-import android.webkit.URLUtil;
-import android.widget.Toast;
-import android.Manifest;
-import android.content.pm.PackageManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
 import android.webkit.ServiceWorkerClient;
 import android.webkit.ServiceWorkerController;
+import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
-import android.webkit.WebResourceError;
-import android.webkit.ValueCallback;
-import android.provider.MediaStore;
-import android.content.ContentValues;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.ProgressBar;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -42,13 +41,13 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
-
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
-
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
+
+import android.Manifest;
 
 import java.util.concurrent.TimeUnit;
 
@@ -56,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private ProgressBar progressBar;
+
     private String fcmTokenForWebView = "";
 
     private String pendingGeoOrigin;
@@ -73,18 +73,13 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        /*
-         * ============================================================
-         * WINDOW / EDGE-TO-EDGE FIX
-         * ============================================================
-         */
-
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
 
         getWindow().setSoftInputMode(
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         );
 
+        // Black system bars
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             getWindow().setStatusBarColor(Color.BLACK);
             getWindow().setNavigationBarColor(Color.BLACK);
@@ -101,24 +96,20 @@ public class MainActivity extends AppCompatActivity {
 
         if (webView != null) {
             webView.setFitsSystemWindows(true);
+
+            // Prevent white flash
+            webView.setBackgroundColor(Color.BLACK);
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
         setupWebView();
 
-        /*
-         * ============================================================
-         * SERVICE WORKER
-         * ============================================================
-         */
-
         if (Build.VERSION.SDK_INT >= 24) {
-
             ServiceWorkerController swController =
                     ServiceWorkerController.getInstance();
 
             swController.setServiceWorkerClient(
                     new ServiceWorkerClient() {
-
                         @Override
                         public WebResourceResponse shouldInterceptRequest(
                                 WebResourceRequest request
@@ -129,12 +120,7 @@ public class MainActivity extends AppCompatActivity {
             );
         }
 
-        /*
-         * ============================================================
-         * NOTIFICATION PERMISSION
-         * ============================================================
-         */
-
+        // Notification permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 
             if (ContextCompat.checkSelfPermission(
@@ -152,12 +138,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        /*
-         * ============================================================
-         * FCM TOKEN
-         * ============================================================
-         */
-
+        // Firebase FCM
         try {
 
             com.google.firebase.messaging.FirebaseMessaging
@@ -168,7 +149,8 @@ public class MainActivity extends AppCompatActivity {
                         if (task.isSuccessful()
                                 && task.getResult() != null) {
 
-                            final String fcmToken = task.getResult();
+                            final String fcmToken =
+                                    task.getResult();
 
                             fcmTokenForWebView = fcmToken;
 
@@ -179,13 +161,13 @@ public class MainActivity extends AppCompatActivity {
 
                             runOnUiThread(() -> {
 
-                                if (webView != null
-                                        && !isOfflinePageShown) {
+                                if (webView != null) {
 
                                     webView.evaluateJavascript(
-                                            "window.FCM_TOKEN = '"
+                                            "window.FCM_TOKEN='"
                                                     + escapeJavaScript(fcmToken)
-                                                    + "'; window.dispatchEvent(new Event('fcm_token_ready')); console.log('FCM Token set');",
+                                                    + "';" +
+                                                    "window.dispatchEvent(new Event('fcm_token_ready'));",
                                             null
                                     );
                                 }
@@ -197,11 +179,6 @@ public class MainActivity extends AppCompatActivity {
 
                                     String endpoint =
                                             "https://chatchikuro-4o.edgeone.dev/fcm_token.php";
-
-                                    android.util.Log.d(
-                                            "FCM_TOKEN",
-                                            "Sending token to: " + endpoint
-                                    );
 
                                     java.net.URL tokenUrl =
                                             new java.net.URL(endpoint);
@@ -246,17 +223,7 @@ public class MainActivity extends AppCompatActivity {
                                     int status =
                                             conn.getResponseCode();
 
-                                    android.util.Log.d(
-                                            "FCM_TOKEN",
-                                            "POST response: HTTP "
-                                                    + status
-                                    );
-
                                     conn.disconnect();
-
-                                    /*
-                                     * GET fallback
-                                     */
 
                                     if (status < 200 || status >= 300) {
 
@@ -289,14 +256,7 @@ public class MainActivity extends AppCompatActivity {
                                         fallbackConn.setConnectTimeout(15000);
                                         fallbackConn.setReadTimeout(15000);
 
-                                        int fbStatus =
-                                                fallbackConn.getResponseCode();
-
-                                        android.util.Log.d(
-                                                "FCM_TOKEN",
-                                                "GET fallback response: HTTP "
-                                                        + fbStatus
-                                        );
+                                        fallbackConn.getResponseCode();
 
                                         fallbackConn.disconnect();
                                     }
@@ -317,13 +277,7 @@ public class MainActivity extends AppCompatActivity {
 
                             android.util.Log.e(
                                     "FCM_TOKEN",
-                                    "Failed to get token: "
-                                            + (
-                                            task.getException() != null
-                                                    ? task.getException()
-                                                    .getMessage()
-                                                    : "unknown error"
-                                    )
+                                    "Failed to get token"
                             );
                         }
                     });
@@ -338,12 +292,7 @@ public class MainActivity extends AppCompatActivity {
             );
         }
 
-        /*
-         * ============================================================
-         * BACKGROUND NOTIFICATION WORKER
-         * ============================================================
-         */
-
+        // Notification worker
         PeriodicWorkRequest workRequest =
                 new PeriodicWorkRequest.Builder(
                         NotificationWorker.class,
@@ -358,12 +307,7 @@ public class MainActivity extends AppCompatActivity {
                         workRequest
                 );
 
-        /*
-         * ============================================================
-         * RUNTIME PERMISSIONS
-         * ============================================================
-         */
-
+        // Permissions
         java.util.List<String> permissionsNeeded =
                 new java.util.ArrayList<>();
 
@@ -395,60 +339,13 @@ public class MainActivity extends AppCompatActivity {
             );
         }
 
-        /*
-         * ============================================================
-         * DEEP LINK
-         * ============================================================
-         */
-
         handleIntent(getIntent());
 
-        /*
-         * ============================================================
-         * INITIAL LOAD
-         * ============================================================
-         */
-
+        // Start with website or black offline page
         loadWebsiteOrOffline();
     }
 
-    /*
-     * ================================================================
-     * WEBVIEW SETUP
-     * ================================================================
-     */
-
     private void setupWebView() {
-
-        /*
-         * Android bridge used by the offline page Retry button.
-         */
-
-        webView.addJavascriptInterface(
-                new Object() {
-
-                    @android.webkit.JavascriptInterface
-                    public void retry() {
-
-                        runOnUiThread(() -> {
-
-                            if (isNetworkAvailable()) {
-
-                                loadWebsite();
-
-                            } else {
-
-                                Toast.makeText(
-                                        MainActivity.this,
-                                        "Still no internet connection",
-                                        Toast.LENGTH_SHORT
-                                ).show();
-                            }
-                        });
-                    }
-                },
-                "AndroidRetry"
-        );
 
         WebSettings webSettings =
                 webView.getSettings();
@@ -489,10 +386,7 @@ public class MainActivity extends AppCompatActivity {
 
         webSettings.setGeolocationEnabled(true);
 
-        /*
-         * Force dark mode following website/system setting.
-         */
-
+        // Dark mode
         if (WebViewFeature.isFeatureSupported(
                 WebViewFeature.FORCE_DARK
         )) {
@@ -515,10 +409,33 @@ public class MainActivity extends AppCompatActivity {
         }
 
         /*
-         * ============================================================
-         * WEBVIEW CLIENT
-         * ============================================================
+         * Offline page Retry bridge
          */
+        webView.addJavascriptInterface(
+                new Object() {
+
+                    @android.webkit.JavascriptInterface
+                    public void retry() {
+
+                        runOnUiThread(() -> {
+
+                            if (isNetworkAvailable()) {
+
+                                loadWebsite();
+
+                            } else {
+
+                                Toast.makeText(
+                                        MainActivity.this,
+                                        "Still no internet connection",
+                                        Toast.LENGTH_SHORT
+                                ).show();
+                            }
+                        });
+                    }
+                },
+                "AndroidRetry"
+        );
 
         webView.setWebViewClient(
                 new WebViewClient() {
@@ -544,52 +461,6 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
 
-                    /*
-                     * Android WebView network error.
-                     */
-
-                    @Override
-                    public void onReceivedError(
-                            WebView view,
-                            WebResourceRequest request,
-                            WebResourceError error
-                    ) {
-
-                        super.onReceivedError(
-                                view,
-                                request,
-                                error
-                        );
-
-                        if (request != null
-                                && request.isForMainFrame()) {
-
-                            showOfflinePage();
-                        }
-                    }
-
-                    /*
-                     * Older Android versions.
-                     */
-
-                    @Override
-                    public void onReceivedError(
-                            WebView view,
-                            int errorCode,
-                            String description,
-                            String failingUrl
-                    ) {
-
-                        super.onReceivedError(
-                                view,
-                                errorCode,
-                                description,
-                                failingUrl
-                        );
-
-                        showOfflinePage();
-                    }
-
                     @Override
                     public void onPageFinished(
                             WebView view,
@@ -601,22 +472,6 @@ public class MainActivity extends AppCompatActivity {
                                 url
                         );
 
-                        /*
-                         * Don't treat offline HTML as website.
-                         */
-
-                        if (isOfflinePageShown) {
-
-                            if (progressBar != null) {
-
-                                progressBar.setVisibility(
-                                        View.GONE
-                                );
-                            }
-
-                            return;
-                        }
-
                         if (progressBar != null) {
 
                             progressBar.setVisibility(
@@ -624,9 +479,11 @@ public class MainActivity extends AppCompatActivity {
                             );
                         }
 
-                        /*
-                         * Save cookies.
-                         */
+                        if (url != null
+                                && url.startsWith("http")) {
+
+                            isOfflinePageShown = false;
+                        }
 
                         String cookies =
                                 CookieManager.getInstance()
@@ -651,21 +508,65 @@ public class MainActivity extends AppCompatActivity {
                                     .apply();
                         }
 
-                        /*
-                         * Re-inject FCM token.
-                         */
-
                         if (fcmTokenForWebView != null
                                 && !fcmTokenForWebView.isEmpty()) {
 
                             view.evaluateJavascript(
-                                    "window.FCM_TOKEN = '"
+                                    "window.FCM_TOKEN='"
                                             + escapeJavaScript(
                                             fcmTokenForWebView
                                     )
-                                            + "'; window.dispatchEvent(new Event('fcm_token_ready'));",
+                                            + "';" +
+                                            "window.dispatchEvent(new Event('fcm_token_ready'));",
                                     null
                             );
+                        }
+                    }
+
+                    @Override
+                    public void onReceivedError(
+                            WebView view,
+                            WebResourceRequest request,
+                            WebResourceError error
+                    ) {
+
+                        super.onReceivedError(
+                                view,
+                                request,
+                                error
+                        );
+
+                        if (Build.VERSION.SDK_INT
+                                >= Build.VERSION_CODES.M) {
+
+                            if (request != null
+                                    && request.isForMainFrame()) {
+
+                                showOfflinePage();
+                            }
+                        }
+                    }
+
+                    @Override
+                    @SuppressWarnings("deprecation")
+                    public void onReceivedError(
+                            WebView view,
+                            int errorCode,
+                            String description,
+                            String failingUrl
+                    ) {
+
+                        super.onReceivedError(
+                                view,
+                                errorCode,
+                                description,
+                                failingUrl
+                        );
+
+                        if (Build.VERSION.SDK_INT
+                                < Build.VERSION_CODES.M) {
+
+                            showOfflinePage();
                         }
                     }
 
@@ -702,12 +603,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-
-        /*
-         * ============================================================
-         * WEB CHROME CLIENT
-         * ============================================================
-         */
 
         webView.setWebChromeClient(
                 new WebChromeClient() {
@@ -797,10 +692,6 @@ public class MainActivity extends AppCompatActivity {
                         fileUploadCallback =
                                 filePathCallback;
 
-                        /*
-                         * Camera
-                         */
-
                         Intent cameraIntent =
                                 new Intent(
                                         MediaStore.ACTION_IMAGE_CAPTURE
@@ -826,10 +717,6 @@ public class MainActivity extends AppCompatActivity {
                                 cameraImageUri
                         );
 
-                        /*
-                         * File chooser
-                         */
-
                         Intent fileIntent =
                                 new Intent(
                                         Intent.ACTION_GET_CONTENT
@@ -840,10 +727,6 @@ public class MainActivity extends AppCompatActivity {
                         );
 
                         fileIntent.setType("*/*");
-
-                        /*
-                         * Combined chooser
-                         */
 
                         Intent chooserIntent =
                                 Intent.createChooser(
@@ -866,12 +749,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
-
-        /*
-         * ============================================================
-         * DOWNLOADS
-         * ============================================================
-         */
 
         webView.setDownloadListener(
                 new DownloadListener() {
@@ -896,13 +773,10 @@ public class MainActivity extends AppCompatActivity {
                                 CookieManager.getInstance()
                                         .getCookie(url);
 
-                        if (cookies != null) {
-
-                            request.addRequestHeader(
-                                    "cookie",
-                                    cookies
-                            );
-                        }
+                        request.addRequestHeader(
+                                "cookie",
+                                cookies
+                        );
 
                         request.addRequestHeader(
                                 "User-Agent",
@@ -913,14 +787,13 @@ public class MainActivity extends AppCompatActivity {
                                 "Downloading file..."
                         );
 
-                        String fileName =
+                        request.setTitle(
                                 URLUtil.guessFileName(
                                         url,
                                         contentDisposition,
                                         mimeType
-                                );
-
-                        request.setTitle(fileName);
+                                )
+                        );
 
                         request.allowScanningByMediaScanner();
 
@@ -931,7 +804,11 @@ public class MainActivity extends AppCompatActivity {
 
                         request.setDestinationInExternalPublicDir(
                                 Environment.DIRECTORY_DOWNLOADS,
-                                fileName
+                                URLUtil.guessFileName(
+                                        url,
+                                        contentDisposition,
+                                        mimeType
+                                )
                         );
 
                         DownloadManager dm =
@@ -940,10 +817,7 @@ public class MainActivity extends AppCompatActivity {
                                                 DOWNLOAD_SERVICE
                                         );
 
-                        if (dm != null) {
-
-                            dm.enqueue(request);
-                        }
+                        dm.enqueue(request);
 
                         Toast.makeText(
                                 getApplicationContext(),
@@ -956,11 +830,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /*
-     * ================================================================
-     * WEBSITE / OFFLINE SYSTEM
-     * ================================================================
+     * Decide whether website or offline page
      */
-
     private void loadWebsiteOrOffline() {
 
         if (isNetworkAvailable()) {
@@ -973,21 +844,29 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /*
+     * Load actual ChatChikuro website
+     */
     private void loadWebsite() {
 
         isOfflinePageShown = false;
 
-        if (progressBar != null) {
+        if (webView != null) {
 
-            progressBar.setVisibility(
-                    View.VISIBLE
-            );
+            webView.setBackgroundColor(Color.BLACK);
+
+            webView.loadUrl(WEBSITE_URL);
         }
-
-        webView.loadUrl(WEBSITE_URL);
     }
 
+    /*
+     * BLACK OFFLINE PAGE
+     */
     private void showOfflinePage() {
+
+        if (webView == null) {
+            return;
+        }
 
         isOfflinePageShown = true;
 
@@ -998,9 +877,13 @@ public class MainActivity extends AppCompatActivity {
             );
         }
 
+        webView.setBackgroundColor(Color.BLACK);
+
         String offlineHtml =
+
                 "<!DOCTYPE html>" +
                 "<html>" +
+
                 "<head>" +
 
                 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\">" +
@@ -1009,144 +892,118 @@ public class MainActivity extends AppCompatActivity {
 
                 "<style>" +
 
-                ":root {" +
-                "--background-color: #ffffff;" +
-                "--primary-color: #111111;" +
-                "--secondary-color: #6e6e73;" +
-                "--button-bg: #111111;" +
-                "--button-text: #ffffff;" +
-                "--icon-bg: #f2f2f7;" +
-                "--border-color: rgba(0, 0, 0, 0.08);" +
+                ":root{" +
+                "--background-color:#000000;" +
+                "--primary-color:#f5f5f7;" +
+                "--secondary-color:#98989d;" +
+                "--button-bg:#ffffff;" +
+                "--button-text:#000000;" +
+                "--icon-bg:#1c1c1e;" +
+                "--border-color:rgba(255,255,255,0.10);" +
                 "}" +
 
-                "[data-theme=\"dark\"] {" +
-                "--background-color: #000000;" +
-                "--primary-color: #f5f5f7;" +
-                "--secondary-color: #98989d;" +
-                "--button-bg: #ffffff;" +
-                "--button-text: #000000;" +
-                "--icon-bg: #1c1c1e;" +
-                "--border-color: rgba(255, 255, 255, 0.1);" +
+                "*{" +
+                "box-sizing:border-box;" +
+                "-webkit-tap-highlight-color:transparent;" +
                 "}" +
 
-                "[data-theme=\"light\"] {" +
-                "--background-color: #ffffff;" +
-                "--primary-color: #111111;" +
-                "--secondary-color: #6e6e73;" +
-                "--button-bg: #111111;" +
-                "--button-text: #ffffff;" +
-                "--icon-bg: #f2f2f7;" +
-                "--border-color: rgba(0, 0, 0, 0.08);" +
+                "html,body{" +
+                "width:100%;" +
+                "height:100%;" +
+                "margin:0;" +
+                "background:#000000 !important;" +
+                "color:var(--primary-color);" +
+                "font-family:-apple-system,BlinkMacSystemFont,\"SF Pro Display\",\"SF Pro Text\",\"Helvetica Neue\",Arial,sans-serif;" +
                 "}" +
 
-                "*" +
-                "{" +
-                "box-sizing: border-box;" +
-                "-webkit-tap-highlight-color: transparent;" +
+                "body{" +
+                "display:flex;" +
+                "align-items:center;" +
+                "justify-content:center;" +
+                "overflow:hidden;" +
                 "}" +
 
-                "html,body {" +
-                "width: 100%;" +
-                "height: 100%;" +
-                "margin: 0;" +
-                "background: var(--background-color) !important;" +
-                "color: var(--primary-color);" +
-                "font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Display\", \"SF Pro Text\", \"Helvetica Neue\", Arial, sans-serif;" +
-                "transition: background-color 0.25s ease, color 0.25s ease;" +
+                "div.container{" +
+                "width:min(88%,420px);" +
+                "position:relative;" +
+                "top:0;" +
+                "text-align:center;" +
+                "animation:fadeUp .45s ease-out;" +
                 "}" +
 
-                "body {" +
-                "display: flex;" +
-                "align-items: center;" +
-                "justify-content: center;" +
-                "overflow: hidden;" +
+                "#logo{" +
+                "width:92px;" +
+                "height:92px;" +
+                "margin:0 auto 28px;" +
+                "display:flex;" +
+                "align-items:center;" +
+                "justify-content:center;" +
+                "background:#1c1c1e;" +
+                "border:1px solid rgba(255,255,255,.10);" +
+                "border-radius:24px;" +
+                "box-shadow:0 8px 30px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.06);" +
                 "}" +
 
-                "div.container {" +
-                "width: min(88%, 420px);" +
-                "position: relative;" +
-                "top: 0;" +
-                "text-align: center;" +
-                "animation: fadeUp 0.45s ease-out;" +
+                "#logo svg{" +
+                "width:58px;" +
+                "height:auto;" +
                 "}" +
 
-                "#logo {" +
-                "width: 92px;" +
-                "height: 92px;" +
-                "margin: 0 auto 28px;" +
-                "display: flex;" +
-                "align-items: center;" +
-                "justify-content: center;" +
-                "background: var(--icon-bg);" +
-                "border: 1px solid var(--border-color);" +
-                "border-radius: 24px;" +
-                "box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.12);" +
+                "#logo > svg > g > path{" +
+                "fill:#f5f5f7;" +
                 "}" +
 
-                "#logo svg {" +
-                "width: 58px;" +
-                "height: auto;" +
+                "#message{" +
+                "display:block;" +
                 "}" +
 
-                "#logo > svg > g > path {" +
-                "fill: var(--primary-color);" +
+                "#message p{" +
+                "margin:0;" +
+                "color:#98989d;" +
+                "font-size:16px;" +
+                "line-height:1.55;" +
+                "font-weight:400;" +
+                "letter-spacing:-.01em;" +
                 "}" +
 
-                "#message {" +
-                "display: block;" +
+                "#message p::first-line{" +
+                "color:#f5f5f7;" +
+                "font-weight:600;" +
                 "}" +
 
-                "#message p {" +
-                "margin: 0;" +
-                "color: var(--secondary-color);" +
-                "font-size: 16px;" +
-                "line-height: 1.55;" +
-                "font-weight: 400;" +
-                "letter-spacing: -0.01em;" +
+                "#retryButton{" +
+                "appearance:none;" +
+                "-webkit-appearance:none;" +
+                "border:0;" +
+                "outline:none;" +
+                "margin-top:28px;" +
+                "min-width:132px;" +
+                "height:46px;" +
+                "padding:0 24px;" +
+                "border-radius:14px;" +
+                "background:#ffffff;" +
+                "color:#000000;" +
+                "font-family:inherit;" +
+                "font-size:15px;" +
+                "font-weight:600;" +
+                "letter-spacing:-.01em;" +
+                "cursor:pointer;" +
+                "box-shadow:0 5px 18px rgba(255,255,255,.10);" +
+                "transition:transform .15s ease,opacity .15s ease;" +
                 "}" +
 
-                "#message p::first-line {" +
-                "color: var(--primary-color);" +
-                "font-weight: 600;" +
+                "#retryButton:active{" +
+                "transform:scale(.96);" +
+                "opacity:.82;" +
                 "}" +
 
-                "#retryButton {" +
-                "appearance: none;" +
-                "-webkit-appearance: none;" +
-                "border: 0;" +
-                "outline: none;" +
-                "margin-top: 28px;" +
-                "min-width: 132px;" +
-                "height: 46px;" +
-                "padding: 0 24px;" +
-                "border-radius: 14px;" +
-                "background: var(--button-bg);" +
-                "color: var(--button-text);" +
-                "font-family: inherit;" +
-                "font-size: 15px;" +
-                "font-weight: 600;" +
-                "letter-spacing: -0.01em;" +
-                "cursor: pointer;" +
-                "box-shadow: 0 5px 18px rgba(0, 0, 0, 0.12);" +
-                "transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;" +
-                "}" +
-
-                "#retryButton:active {" +
-                "transform: scale(0.96);" +
-                "opacity: 0.82;" +
-                "}" +
-
-                "@media (prefers-reduced-motion: reduce) {" +
-                "div.container { animation: none; }" +
-                "#retryButton { transition: none; }" +
-                "}" +
-
-                "@keyframes fadeUp {" +
-                "from { opacity: 0; transform: translateY(12px); }" +
-                "to { opacity: 1; transform: translateY(0); }" +
+                "@keyframes fadeUp{" +
+                "from{opacity:0;transform:translateY(12px)}" +
+                "to{opacity:1;transform:translateY(0)}" +
                 "}" +
 
                 "</style>" +
+
                 "</head>" +
 
                 "<body>" +
@@ -1159,9 +1016,9 @@ public class MainActivity extends AppCompatActivity {
 
                 "<g clip-path=\"url(#clip0_5510_497)\">" +
 
-                "<path d=\"M118.275 87.9562L7.27647 0.958312C6.45147 0.313687 5.47272 0 4.50522 0C3.17022 0 1.84459 0.592125 0.959779 1.72294C-0.575284 3.68062 -0.234596 6.51 1.72253 8.04187L112.554 94.8731C114.523 96.4112 117.348 96.0596 118.871 94.1085C120.581 92.325 120.225 89.4937 118.275 87.9562Z\" fill=\"black\"/>" +
+                "<path d=\"M118.275 87.9562L7.27647 0.958312C6.45147 0.313687 5.47272 0 4.50522 0C3.17022 0 1.84459 0.592125 0.959779 1.72294C-0.575284 3.68062 -0.234596 6.51 1.72253 8.04187L112.554 94.8731C114.523 96.4112 117.348 96.0596 118.871 94.1085C120.581 92.325 120.225 89.4937 118.275 87.9562Z\" fill=\"#F5F5F7\"/>" +
 
-                "<path opacity=\"0.4\" d=\"M36 53.8313C32.6869 53.8313 30 56.5163 30 59.6625V89.4937C30 92.8069 32.6869 95.4937 36 95.4937C39.3131 95.4937 42 92.8069 42 89.4937V59.6625C42 56.6813 39.3187 53.8313 36 53.8313ZM54 90C54 93.3131 56.6869 96 60 96C63.3131 96 66 93.3131 66 90V69.8625L54 60.4575V90ZM12 71.8313C8.68687 71.8313 6 74.5163 6 77.6625V89.4937C6 92.8069 8.68687 95.4937 12 95.4937C15.3131 95.4937 18 92.8069 18 89.4937V77.6625C18 74.6813 15.3131 71.8313 12 71.8313ZM60 36C57.9937 36 56.325 37.0313 55.2375 38.55L66 46.9875V42C66 38.6812 63.3187 36 60 36ZM107.831 0C104.518 0 101.831 2.68687 101.831 6V75.2063L113.831 84.6113V6C113.831 2.68687 111.319 0 107.831 0ZM78 90C78 93.3131 80.6869 96 84 96C87.3131 96 90 93.3131 90 90V88.6684L78 79.2634V90ZM84 18C80.6869 18 78 20.6869 78 24V56.3813L90 65.7862V24C90 20.6812 87.3187 18 84 18Z\" fill=\"black\"/>" +
+                "<path opacity=\"0.4\" d=\"M36 53.8313C32.6869 53.8313 30 56.5163 30 59.6625V89.4937C30 92.8069 32.6869 95.4937 36 95.4937C39.3131 95.4937 42 92.8069 42 89.4937V59.6625C42 56.6813 39.3187 53.8313 36 53.8313ZM54 90C54 93.3131 56.6869 96 60 96C63.3131 96 66 93.3131 66 90V69.8625L54 60.4575V90ZM12 71.8313C8.68687 71.8313 6 74.5163 6 77.6625V89.4937C6 92.8069 8.68687 95.4937 12 95.4937C15.3131 95.4937 18 92.8069 18 89.4937V77.6625C18 74.6813 15.3131 71.8313 12 71.8313ZM60 36C57.9937 36 56.325 37.0313 55.2375 38.55L66 46.9875V42C66 38.6812 63.3187 36 60 36ZM107.831 0C104.518 0 101.831 2.68687 101.831 6V75.2063L113.831 84.6113V6C113.831 2.68687 111.319 0 107.831 0ZM78 90C78 93.3131 80.6869 96 84 96C87.3131 96 90 93.3131 90 90V88.6684L78 79.2634V90ZM84 18C80.6869 18 78 20.6869 78 24V56.3813L90 65.7862V24C90 20.6812 87.3187 18 84 18Z\" fill=\"#F5F5F7\"/>" +
 
                 "</g>" +
 
@@ -1178,48 +1035,31 @@ public class MainActivity extends AppCompatActivity {
                 "</div>" +
 
                 "<span id=\"message\">" +
+
                 "<p>No internet connection<br>Check your connection and try again</p>" +
+
                 "</span>" +
 
-                "<button id=\"retryButton\" type=\"button\" onclick=\"AndroidRetry.retry()\">" +
-                "Retry" +
-                "</button>" +
+                "<button id=\"retryButton\" type=\"button\" onclick=\"AndroidRetry.retry()\">Retry</button>" +
 
                 "</div>" +
 
                 "<script>" +
 
-                "var message = document.getElementById('message');" +
-                "var retryButton = document.getElementById('retryButton');" +
+                "var message=document.getElementById('message');" +
+                "var retryButton=document.getElementById('retryButton');" +
 
-                "if (['ko', 'ko-kr', 'ko-kp'].indexOf(navigator.language.toLowerCase()) > -1) {" +
+                "if(['ko','ko-kr','ko-kp'].indexOf(navigator.language.toLowerCase())>-1){" +
 
-                "message.innerHTML = '<p>인터넷 연결이 끊겼습니다.<br/>연결하고 다시 시도하시길 바랍니다.</p>';" +
-                "retryButton.innerText = '괜찮아';" +
-
-                "}" +
-
-                "function updateDarkMode() {" +
-
-                "if (window.matchMedia('(prefers-color-scheme: dark)').matches) {" +
-                "document.documentElement.setAttribute('data-theme', 'dark');" +
-                "} else {" +
-                "document.documentElement.setAttribute('data-theme', 'light');" +
-                "}" +
-
-                "}" +
-
-                "updateDarkMode();" +
-
-                "if (window.matchMedia) {" +
-
-                "window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateDarkMode);" +
+                "message.innerHTML='<p>인터넷 연결이 끊겼습니다.<br/>연결하고 다시 시도하시길 바랍니다.</p>';" +
+                "retryButton.innerText='괜찮아';" +
 
                 "}" +
 
                 "</script>" +
 
                 "</body>" +
+
                 "</html>";
 
         webView.loadDataWithBaseURL(
@@ -1231,62 +1071,47 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    /*
-     * ================================================================
-     * NETWORK CHECK
-     * ================================================================
-     */
-
     private boolean isNetworkAvailable() {
 
-        ConnectivityManager connectivityManager =
+        ConnectivityManager cm =
                 (ConnectivityManager)
                         getSystemService(
                                 Context.CONNECTIVITY_SERVICE
                         );
 
-        if (connectivityManager == null) {
+        if (cm == null) {
             return false;
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 
             android.net.Network network =
-                    connectivityManager.getActiveNetwork();
+                    cm.getActiveNetwork();
 
             if (network == null) {
                 return false;
             }
 
-            android.net.NetworkCapabilities capabilities =
-                    connectivityManager.getNetworkCapabilities(
-                            network
-                    );
+            NetworkCapabilities capabilities =
+                    cm.getNetworkCapabilities(network);
 
             if (capabilities == null) {
                 return false;
             }
 
             return capabilities.hasCapability(
-                    android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET
+                    NetworkCapabilities.NET_CAPABILITY_INTERNET
             );
 
         } else {
 
-            NetworkInfo activeNetworkInfo =
-                    connectivityManager
-                            .getActiveNetworkInfo();
+            NetworkInfo info =
+                    cm.getActiveNetworkInfo();
 
-            return activeNetworkInfo != null
-                    && activeNetworkInfo.isConnected();
+            return info != null
+                    && info.isConnected();
         }
     }
-
-    /*
-     * ================================================================
-     * JAVASCRIPT ESCAPE
-     * ================================================================
-     */
 
     private String escapeJavaScript(String value) {
 
@@ -1298,26 +1123,22 @@ public class MainActivity extends AppCompatActivity {
                 .replace("\\", "\\\\")
                 .replace("'", "\\'")
                 .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("</", "<\\/");
+                .replace("\r", "\\r");
     }
-
-    /*
-     * ================================================================
-     * URL HANDLING
-     * ================================================================
-     */
 
     private boolean handleWebViewUrl(
             WebView view,
             String url
     ) {
 
-        if (url == null || url.trim().isEmpty()) {
+        if (url == null
+                || url.trim().isEmpty()) {
+
             return false;
         }
 
-        String lower = url.toLowerCase();
+        String lower =
+                url.toLowerCase();
 
         if (
                 lower.startsWith("tel:")
@@ -1396,20 +1217,13 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
 
-        } catch (Exception e) {
-            // Ignore and load in WebView
+        } catch (Exception ignored) {
         }
 
         view.loadUrl(url);
 
         return true;
     }
-
-    /*
-     * ================================================================
-     * DEEP LINKS
-     * ================================================================
-     */
 
     private void handleIntent(Intent intent) {
 
@@ -1423,14 +1237,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (deepUrl.startsWith("http")) {
 
-                if (isNetworkAvailable()) {
-
-                    webView.loadUrl(deepUrl);
-
-                } else {
-
-                    showOfflinePage();
-                }
+                webView.loadUrl(deepUrl);
             }
         }
     }
@@ -1440,16 +1247,8 @@ public class MainActivity extends AppCompatActivity {
 
         super.onNewIntent(intent);
 
-        setIntent(intent);
-
         handleIntent(intent);
     }
-
-    /*
-     * ================================================================
-     * FILE UPLOAD RESULT
-     * ================================================================
-     */
 
     private final ActivityResultLauncher<Intent>
             fileUploadLauncher =
@@ -1498,12 +1297,6 @@ public class MainActivity extends AppCompatActivity {
                     }
             );
 
-    /*
-     * ================================================================
-     * PAUSE / RESUME
-     * ================================================================
-     */
-
     @Override
     protected void onPause() {
 
@@ -1520,27 +1313,15 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
 
         if (webView != null) {
-
             webView.onResume();
+        }
 
-            /*
-             * If the app was opened offline and connection has
-             * returned while it was in background, reload website.
-             */
+        if (isOfflinePageShown
+                && isNetworkAvailable()) {
 
-            if (isOfflinePageShown
-                    && isNetworkAvailable()) {
-
-                loadWebsite();
-            }
+            loadWebsite();
         }
     }
-
-    /*
-     * ================================================================
-     * PERMISSIONS
-     * ================================================================
-     */
 
     @Override
     public void onRequestPermissionsResult(
@@ -1587,12 +1368,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
-
-    /*
-     * ================================================================
-     * DESTROY
-     * ================================================================
-     */
 
     @Override
     protected void onDestroy() {
